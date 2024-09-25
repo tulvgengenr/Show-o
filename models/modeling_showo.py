@@ -38,11 +38,14 @@ class Showo(ModelMixin, ConfigMixin):
         super().__init__()
         self.vocab_size = vocab_size
         self.register_to_config(mask_token_id=vocab_size - 1)
+        print(f"load_fron_showo: {load_from_showo}")
         if load_from_showo:
             config = AutoConfig.from_pretrained(llm_model_path)
             self.showo = PhiForCausalLM(config)
+            print(f'Loading from {llm_model_path}')
         else:
             self.showo = PhiForCausalLM.from_pretrained(llm_model_path, attn_implementation='sdpa')
+            print(F"Loading from {llm_model_path}")
         self.showo.resize_token_embeddings(self.vocab_size)
         self.output_size = self.vocab_size
 

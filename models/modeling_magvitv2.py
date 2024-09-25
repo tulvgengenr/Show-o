@@ -146,26 +146,40 @@ class VQGANEncoder(ModelMixin, ConfigMixin):
 
         # downsampling
         hs = [self.conv_in(x)]
+        # print(f"hs: {hs[0].shape}")
         for i_level in range(self.num_resolutions):
             for i_block in range(self.num_res_blocks[i_level]):
                 h = self.down[i_level].block[i_block](hs[-1], temb)
+                # print("residual blocking...")
                 if len(self.down[i_level].attn) > 0:
                     h = self.down[i_level].attn[i_block](h)
+                    # print("attention...")
                 hs.append(h)
+                # print(f"hs: {hs[-1].shape}")
             if i_level != self.num_resolutions - 1:
                 hs.append(self.down[i_level].downsample(hs[-1]))
+                # print("downsampling...")
+                # print(f"hs: {hs[-1].shape}")
 
         # middle
         h = hs[-1]
+        # print(f"h: {h.shape}")
         h = self.mid.block_1(h, temb)
+        # print(f"h: {h.shape}")
         h = self.mid.attn_1(h)
+        # print(f"h: {h.shape}")
         h = self.mid.block_2(h, temb)
+        # print(f"h: {h.shape}")
 
         # end
         h = self.norm_out(h)
+        # print(f"h: {h.shape}")
         h = nonlinearity(h)
+        # print(f"h: {h.shape}")
         h = self.conv_out(h)
+        # print(f"h: {h.shape}")
         h = self.quant_conv(h)
+        # print(f"h: {h.shape}")
         return h
 
 
@@ -191,6 +205,7 @@ class LFQuantizer(nn.Module):
                  ) & 1
 
         embedding = binary.float() * 2 - 1
+        print(f"LFVQ embedding shape: {embedding.shape}")
         self.register_buffer("embedding", embedding)
         self.register_buffer(
             "power_vals", 2 ** torch.arange(codebook_dim - 1, -1, -1)
@@ -422,8 +437,9 @@ class MAGVITv2(ModelMixin, ConfigMixin):
 
     def get_code(self, pixel_values):
         hidden_states = self.encoder(pixel_values)
+        print(f"hidden_states shape: {hidden_states.shape}")
         codebook_indices = self.quantize.get_indices(self.quantize(hidden_states)['z']).reshape(pixel_values.shape[0], -1)
-
+        print(f"codebook_indices shape: {codebook_indices.shape}")
         return codebook_indices
 
     def decode_code(self, codebook_indices, shape=None):

@@ -87,13 +87,18 @@ if __name__ == '__main__':
     for i, file_name in enumerate(tqdm(file_list)):
         image_path = os.path.join(config.mmu_image_root, file_name)
         image_ori = Image.open(image_path).convert("RGB")
+        a = np.asarray(image_ori)
+        print(f"image_ori shape: {a.shape}")
         image = image_transform(image_ori, resolution=config.dataset.params.resolution).to(device)
         image = image.unsqueeze(0)
+        print(f"Image shape: {image.shape}")
         images.append(image)
 
         pixel_values = clip_image_processor.preprocess(image_ori, return_tensors="pt")["pixel_values"][0]
+        print(f"Pixel values shape: {pixel_values.shape}")
 
         image_tokens = vq_model.get_code(image) + len(uni_prompting.text_tokenizer)
+        print(f"Image tokens shape: {image_tokens.shape}")
         batch_size = 1
 
         for question in config.question:
@@ -102,8 +107,10 @@ if __name__ == '__main__':
                 conv.append_message(conv.roles[0], question)
                 conv.append_message(conv.roles[1], None)
                 prompt_question = conv.get_prompt()
+                print(f"Prompt question: {prompt_question}")
                 question_input = []
                 question_input.append(prompt_question.strip())
+                print(f"question_input: {question_input}")
 
                 input_ids_system = [uni_prompting.text_tokenizer(SYSTEM_PROMPT, return_tensors="pt", padding="longest").input_ids
                                         for _ in range(batch_size)]
@@ -111,6 +118,7 @@ if __name__ == '__main__':
                 assert input_ids_system.shape[-1] == 28
                 input_ids_system = input_ids_system.to(device)
                 input_ids_system = input_ids_system[0]
+                print(f"Input ids system shape: {input_ids_system.shape}")
 
                 input_ids = [uni_prompting.text_tokenizer(prompt, return_tensors="pt", padding="longest").input_ids
                                 for prompt in question_input]
@@ -120,29 +128,33 @@ if __name__ == '__main__':
                         input_ids, batch_first=True, padding_value=uni_prompting.text_tokenizer.pad_token_id
                 )
                 input_ids = torch.tensor(input_ids).to(device).squeeze(0)
+                print(f"Input ids shape: {input_ids.shape}")
                 # import pdb; pdb.set_trace()
                 input_ids_llava = torch.cat([
-                        (torch.ones(input_ids.shape[0], 1) *uni_prompting.sptids_dict['<|mmu|>']).to(device),
+                        (torch.ones(input_ids.shape[0], 1) * uni_prompting.sptids_dict['<|mmu|>']).to(device),
                         input_ids_system,
                         (torch.ones(input_ids.shape[0], 1) * uni_prompting.sptids_dict['<|soi|>']).to(device),
                         # place your img embedding here
                         (torch.ones(input_ids.shape[0], 1) * uni_prompting.sptids_dict['<|eoi|>']).to(device),
                         input_ids,
                 ], dim=1).long()
+                print(f"Input ids llava shape: {input_ids_llava.shape}")
 
                 images_embeddings = vision_tower(pixel_values[None])
+                print(f"Images exported by CLIP: {images_embeddings.shape}")
                 images_embeddings = model.mm_projector(images_embeddings)
-
+                print(f"Images embeddings shape: {images_embeddings.shape}")
                 text_embeddings = model.showo.model.embed_tokens(input_ids_llava)
-
+                print(f"Text embeddings shape: {text_embeddings.shape}")
                 # Full input seq
                 part1 = text_embeddings[:, :2 + SYSTEM_PROMPT_LEN, :]
                 part2 = text_embeddings[:, 2 + SYSTEM_PROMPT_LEN:, :]
                 input_embeddings = torch.cat((part1, images_embeddings, part2), dim=1)
+                print(f"Full Input embeddings  shape: {input_embeddings.shape}")
 
                 attention_mask_llava = create_attention_mask_for_mmu_vit(input_embeddings,
                                                                         system_prompt_len=SYSTEM_PROMPT_LEN)
-
+                print(f"Attention mask llava shape: {attention_mask_llava[0].shape}")
                 cont_toks_list = model.mmu_generate(input_embeddings=input_embeddings,
                                                     attention_mask=attention_mask_llava[0].unsqueeze(0),
                                                     max_new_tokens=100,
