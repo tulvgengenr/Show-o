@@ -194,15 +194,14 @@ class Showo(ModelMixin, ConfigMixin):
             device = idx.device
         except:
             device = input_embeddings.device
-
         result = []
+        # torch.set_printoptions(threshold=float('inf'))
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             # idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
             # logits, _ = self(idx_cond)
             logits = self(idx, input_embeddings=input_embeddings, attention_mask=attention_mask)
-
             L = attention_mask.shape[-1]
             attention_mask = attention_mask.squeeze()
             attention_mask_a = torch.hstack(

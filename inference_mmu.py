@@ -154,10 +154,10 @@ if __name__ == '__main__':
 
                 attention_mask_llava = create_attention_mask_for_mmu_vit(input_embeddings,
                                                                         system_prompt_len=SYSTEM_PROMPT_LEN)
-                print(f"Attention mask llava shape: {attention_mask_llava[0].shape}")
+                print(f"Attention mask llava shape: {attention_mask_llava.shape}")
                 cont_toks_list = model.mmu_generate(input_embeddings=input_embeddings,
                                                     attention_mask=attention_mask_llava[0].unsqueeze(0),
-                                                    max_new_tokens=100,
+                                                    max_new_tokens=50,
                                                     top_k=top_k,
                                                     eot_token=tokenizer.eos_token_id
                                                     )
