@@ -183,6 +183,16 @@ if __name__ == '__main__':
                                             eot_token=uni_prompting.sptids_dict['<|eot|>'])
 
             cont_toks_list = torch.stack(cont_toks_list).squeeze()[None]
+            print(f"cont_toks_list shape: {cont_toks_list.shape}")
+
+            # # print every token
+            # cont_toks_tensor_list = []
+            # for i in range(cont_toks_list.size(dim=-1)):
+            #     cont_toks_tensor_list.append(cont_toks_list[:, :i+1])
+
+            # for i in range(len(cont_toks_tensor_list)):
+            #     text = uni_prompting.text_tokenizer.batch_decode(cont_toks_tensor_list[i], skip_special_tokens=True)
+            #     print(text)
 
             text = uni_prompting.text_tokenizer.batch_decode(cont_toks_list, skip_special_tokens=True)
             print(text)
