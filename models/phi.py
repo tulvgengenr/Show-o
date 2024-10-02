@@ -1093,6 +1093,7 @@ class PhiForCausalLM(PhiPreTrainedModel):
 
         # Initialize weights and apply final processing
         self.post_init()
+        self.config.output_attentions = True
 
     # Copied from transformers.models.llama.modeling_llama.LlamaForCausalLM.get_input_embeddings
     def get_input_embeddings(self):

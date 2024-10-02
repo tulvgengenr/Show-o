@@ -15,10 +15,14 @@
 
 import torch
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import seaborn as sns
+import wandb
 from transformers import AutoConfig
 from .modeling_utils import ConfigMixin, ModelMixin, register_to_config
 from .sampling import cosine_schedule, mask_by_random_topk
 from .phi import PhiForCausalLM
+from sklearn.preprocessing import MinMaxScaler
 
 class Showo(ModelMixin, ConfigMixin):
     _supports_gradient_checkpointing = True
@@ -40,8 +44,9 @@ class Showo(ModelMixin, ConfigMixin):
         self.register_to_config(mask_token_id=vocab_size - 1)
         print(f"load_fron_showo: {load_from_showo}")
         if load_from_showo:
-            config = AutoConfig.from_pretrained(llm_model_path)
+            config = AutoConfig.from_pretrained(llm_model_path, attn_implementation="eager")
             self.showo = PhiForCausalLM(config)
+            print(f"self.showo: {self.showo}")
             print(f'Loading from {llm_model_path}')
         else:
             self.showo = PhiForCausalLM.from_pretrained(llm_model_path, attn_implementation='sdpa')
@@ -78,7 +83,10 @@ class Showo(ModelMixin, ConfigMixin):
         if input_embeddings is None:
             logits = self.showo(input_ids=input_ids, attention_mask=attention_mask)['logits']
         else:
-            logits = self.showo(inputs_embeds=input_embeddings, attention_mask=attention_mask)['logits']
+            output_dict = self.showo(inputs_embeds=input_embeddings, attention_mask=attention_mask)
+            logits = output_dict['logits']
+            attentions = output_dict['attentions']
+
 
         if labels is not None:
             # 1. Mask token prediction (discrete diffusion) for image generation
@@ -102,7 +110,7 @@ class Showo(ModelMixin, ConfigMixin):
 
             return logits, loss_t2i, loss_lm, loss_mmu
 
-        return logits
+        return logits, attentions
 
     def t2i_generate(
             self,
@@ -196,12 +204,13 @@ class Showo(ModelMixin, ConfigMixin):
             device = input_embeddings.device
         result = []
         # torch.set_printoptions(threshold=float('inf'))
+        attentions = None
         for _ in range(max_new_tokens):
             # if the sequence context is growing too long we must crop it at block_size
             # idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
             # forward the model to get the logits for the index in the sequence
             # logits, _ = self(idx_cond)
-            logits = self(idx, input_embeddings=input_embeddings, attention_mask=attention_mask)
+            logits, attentions = self(idx, input_embeddings=input_embeddings, attention_mask=attention_mask)
             L = attention_mask.shape[-1]
             attention_mask = attention_mask.squeeze()
             attention_mask_a = torch.hstack(
@@ -217,6 +226,7 @@ class Showo(ModelMixin, ConfigMixin):
                 ]
             )
             attention_mask = attention_mask_b
+            attention_mask = attention_mask.unsqueeze(0).unsqueeze(0)
 
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
@@ -238,5 +248,31 @@ class Showo(ModelMixin, ConfigMixin):
 
             if eot_token is not None and idx_next.cpu() == eot_token:
                 break
+        
+        attentions_reduced_heads = [torch.mean(attention, dim=1) for attention in attentions]
+        
+        attention_last = attentions_reduced_heads[-1]
+        self.log_attn_map(attention_last[0])
+        
 
         return result
+    
+    def log_attn_map(self, attention):
+        attention_np = attention.cpu().detach().numpy()
+        scaler = MinMaxScaler()
+        data_normalized = scaler.fit_transform(attention_np)
+
+        plt.figure(figsize=(10, 10))
+        sns.heatmap(data_normalized, cmap='viridis', cbar=True)
+
+        # 设置标题和轴标签
+        plt.title("669x669 Heatmap")
+        plt.xlabel("X-axis")
+        plt.ylabel("Y-axis")
+
+        plt.savefig("attention_map.png")
+
+        # 显示图形
+        plt.show()
+
+        plt.close()
