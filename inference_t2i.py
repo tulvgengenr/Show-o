@@ -82,10 +82,10 @@ if __name__ == '__main__':
         prompt = [config.prompt] * config.batch_size
         inpainting_image = Image.open(config.image_path).convert("RGB")
         inpainting_mask = Image.open(config.inpainting_mask_path).convert("L")
+        # inpainting_mask = Image.new("L", inpainting_image.size, color=0)
 
         inpainting_image = image_transform(inpainting_image, resolution=config.dataset.params.resolution).to(device)
         inpainting_mask = image_transform(inpainting_mask, resolution=config.dataset.params.resolution, normalize=False)
-
         # record original image and inpainting mask
         images = torch.clamp(
             (torch.stack([inpainting_image, inpainting_mask.repeat(3, 1, 1).to(device)], dim=0) + 1.0) / 2.0,
@@ -98,7 +98,6 @@ if __name__ == '__main__':
         wandb_images = [wandb.Image(image, caption=labels[i]) for i, image in enumerate(pil_images)]
 
         inpainting_image = inpainting_image.unsqueeze(0).repeat(config.training.batch_size, 1, 1, 1)
-
         inpainting_mask = inpainting_mask.unsqueeze(0).to(device)
         inpainting_mask = F.interpolate(inpainting_mask, size=config.dataset.params.resolution // 16, mode='bicubic')
         inpainting_mask = inpainting_mask.repeat(config.training.batch_size, 1, 1, 1)
@@ -342,3 +341,67 @@ if __name__ == '__main__':
 
             wandb_images = [wandb.Image(image, caption=prompts[i]) for i, image in enumerate(pil_images)]
             wandb.log({"generated_images": wandb_images}, step=step)
+
+    elif config.mode == 'ti2ss':
+        with open(config.dataset.params.validation_prompts_file, "r") as f:
+            validation_prompts = f.read().splitlines()
+
+        for step in tqdm(range(0, len(validation_prompts), config.training.batch_size)):
+            prompts = validation_prompts[step:step + config.training.batch_size]
+
+            image_ori = Image.open(config.image_path).convert("RGB")
+            a = np.asarray(image_ori)
+            image = image_transform(image_ori, resolution=config.dataset.params.resolution).to(device)
+            image = image.unsqueeze(0).repeat(config.training.batch_size, 1, 1, 1)
+            image_tokens = vq_model.get_code(image) + len(uni_prompting.text_tokenizer)
+            
+            input_ids, _ = uni_prompting((prompts, image_tokens), 't2i_gen')
+
+            if config.training.guidance_scale > 0:
+                uncond_input_ids, _ = uni_prompting(([''] * len(prompts), image_tokens), 't2i_gen')
+                attention_mask = create_attention_mask_predict_next(torch.cat([input_ids, uncond_input_ids], dim=0),
+                                                                    pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
+                                                                    soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
+                                                                    eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
+                                                                    rm_pad_in_image=True)
+            else:
+                attention_mask = create_attention_mask_predict_next(input_ids,
+                                                                    pad_id=int(uni_prompting.sptids_dict['<|pad|>']),
+                                                                    soi_id=int(uni_prompting.sptids_dict['<|soi|>']),
+                                                                    eoi_id=int(uni_prompting.sptids_dict['<|eoi|>']),
+                                                                    rm_pad_in_image=True)
+                uncond_input_ids = None
+
+            if config.get("mask_schedule", None) is not None:
+                schedule = config.mask_schedule.schedule
+                args = config.mask_schedule.get("params", {})
+                mask_schedule = get_mask_chedule(schedule, **args)
+            else:
+                mask_schedule = get_mask_chedule(config.training.get("mask_schedule", "cosine"))
+            
+            with torch.no_grad():
+                gen_token_ids = model.t2i_generate(
+                    input_ids=input_ids,
+                    uncond_input_ids=uncond_input_ids,
+                    attention_mask=attention_mask,
+                    guidance_scale=config.training.guidance_scale,
+                    temperature=config.training.get("generation_temperature", 1.0),
+                    timesteps=config.training.generation_timesteps,
+                    noise_schedule=mask_schedule,
+                    noise_type=config.training.get("noise_type", "mask"),
+                    seq_len=config.model.showo.num_vq_tokens,
+                    uni_prompting=uni_prompting,
+                    config=config,
+                )
+            
+            gen_token_ids = torch.clamp(gen_token_ids, max=config.model.showo.codebook_size - 1, min=0)
+            images = vq_model.decode_code(gen_token_ids)
+            images = torch.clamp((images + 1.0) / 2.0, min=0.0, max=1.0)
+            images *= 255.0
+            images = images.permute(0, 2, 3, 1).cpu().numpy().astype(np.uint8)
+            pil_images = [Image.fromarray(image) for image in images]
+
+            wandb_images = [wandb.Image(image, caption=prompts[i]) for i, image in enumerate(pil_images)]
+            wandb.log({"generated_images": wandb_images}, step=step)
+
+

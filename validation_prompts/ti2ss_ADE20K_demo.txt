@@ -1,0 +1,1 @@
+Instead of generating the same image as the original, please identify the bus inside and modify its appearance to blue.
