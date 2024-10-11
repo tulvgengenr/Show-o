@@ -155,7 +155,7 @@ class Showo(ModelMixin, ConfigMixin):
             sampled_ids = torch.multinomial(sampled, 1, generator=generator)[:, 0].view(*logits.shape[:-1])
 
             unknown_map = input_ids_minus_lm_vocab_size == mask_token_id 
-            print(f"unknown_map: {unknown_map}")
+            # print(f"unknown_map: {unknown_map}")
             # print(f"unknown_map.shape: {unknown_map.shape}")
 
             sampled_ids = torch.where(unknown_map, sampled_ids, input_ids_minus_lm_vocab_size)
@@ -252,3 +252,85 @@ class Showo(ModelMixin, ConfigMixin):
                 break
 
         return result
+
+    def ti2ss_generate(
+        self,
+        input_ids: torch.LongTensor = None, # [image_id, text_id, image_masked_id]
+        uncond_input_ids: torch.LongTensor = None,
+        attention_mask=None,
+        temperature=1.0,
+        timesteps=18,  # ideal number of steps is 18 in maskgit paper
+        guidance_scale=0,
+        noise_schedule=cosine_schedule,
+        generator: torch.Generator = None,
+        config=None,
+        **kwargs,
+    ):  
+
+        # begin with all image token ids masked
+        mask_token_id = self.config.mask_token_id
+        num_vq_tokens = config.model.showo.num_vq_tokens
+        num_new_special_tokens = config.model.showo.num_new_special_tokens
+
+        
+        input_ids_minus_lm_vocab_size = input_ids[:, -(num_vq_tokens + 1):-1].clone()
+        input_ids_minus_lm_vocab_size = torch.where(input_ids_minus_lm_vocab_size == mask_token_id,
+                                            mask_token_id,
+                                            input_ids_minus_lm_vocab_size - config.model.showo.llm_vocab_size - num_new_special_tokens)
+
+        # for classifier-free guidance
+        if uncond_input_ids is not None:
+            uncond_prefix = uncond_input_ids[:, :num_vq_tokens + 2 + config.dataset.preprocessing.max_seq_length + 1] # 取出uncond_inout_ids前面的token_id部分，实际上是空
+
+        for step in range(timesteps):
+            if uncond_input_ids is not None and guidance_scale > 0:
+                uncond_input_ids = torch.cat(
+                    [uncond_prefix, input_ids[:, num_vq_tokens + 2 + config.dataset.preprocessing.max_seq_length + 1:]], dim=1) 
+                model_input = torch.cat([input_ids, uncond_input_ids])
+                cond_logits, uncond_logits = self(model_input, attention_mask=attention_mask).chunk(2)
+                logits = (1 + guidance_scale) * cond_logits - guidance_scale * uncond_logits
+                logits = logits[:, -(num_vq_tokens + 1):-1, config.model.showo.llm_vocab_size + num_new_special_tokens:-1]
+            else:
+                logits = self(input_ids, attention_mask=attention_mask)
+                logits = logits[:, -(num_vq_tokens + 1):-1, config.model.showo.llm_vocab_size + num_new_special_tokens:-1]
+
+            probs = logits.softmax(dim=-1)
+            sampled = probs.reshape(-1, logits.size(-1))
+            sampled_ids = torch.multinomial(sampled, 1, generator=generator)[:, 0].view(*logits.shape[:-1])
+
+            unknown_map = input_ids_minus_lm_vocab_size == mask_token_id 
+
+            sampled_ids = torch.where(unknown_map, sampled_ids, input_ids_minus_lm_vocab_size)
+
+            # Defines the mask ratio for the next round. The number to mask out is
+            # determined by mask_ratio * unknown_number_in_the_beginning.
+            ratio = 1.0 * (step + 1) / timesteps
+            mask_ratio = noise_schedule(torch.tensor(ratio))
+
+            # Computes the probabilities of each selected tokens.
+            selected_probs = torch.gather(probs, -1, sampled_ids.long()[..., None])
+            selected_probs = selected_probs.squeeze(-1)
+
+            # Ignores the tokens given in the input by overwriting their confidence.
+            selected_probs = torch.where(unknown_map, selected_probs, torch.finfo(selected_probs.dtype).max)
+
+            # Gets mask lens for each sample in the batch according to the mask ratio.
+            mask_len = (num_vq_tokens * mask_ratio).floor().unsqueeze(0).to(logits.device)
+
+            # Keeps at least one of prediction in this round and also masks out at least
+            # one and for the next iteration
+            mask_len = torch.max(
+                torch.tensor([1], device=logits.device), torch.min(unknown_map.sum(dim=-1, keepdim=True) - 1, mask_len)
+            )
+
+            # Adds noise for randomness
+            temperature = temperature * (1.0 - ratio)
+            masking = mask_by_random_topk(mask_len, selected_probs, temperature, generator=generator)
+
+            # Masks tokens with lower confidence.
+            input_ids[:, -(num_vq_tokens + 1):-1] = torch.where(masking, mask_token_id,
+                                                          sampled_ids + config.model.showo.llm_vocab_size
+                                                          + num_new_special_tokens)
+            input_ids_minus_lm_vocab_size = torch.where(masking, mask_token_id, sampled_ids)
+
+        return sampled_ids

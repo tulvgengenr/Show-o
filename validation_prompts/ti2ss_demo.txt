@@ -1,0 +1,1 @@
+Extract the outline of the bus from the image.

@@ -393,6 +393,44 @@ class UniversalPrompting():
             attention_masks.append(temp_masks.unsqueeze(0))
 
         return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0)
+ 
+    def t2iss_prompt(self, image_ids, text_ids, image_masked_ids):
+        device = image_ids.device
+        sequence_ids = []
+        attention_masks = [] # for text tokens, but unused
+
+        for i in range(len(text_ids)):
+            if len(text_ids[i]) == 0:
+                text_ids[i] = [self.text_tokenizer.bos_token_id]
+            elif text_ids[i][0] != self.text_tokenizer.bos_token_id:
+                text_ids[i] = [self.text_tokenizer.bos_token_id] + text_ids[i]
+            # note that, llama3 tokenizer automatically add the bot token at first but without eot
+            # TODO: '<|t2i|>' is correct at this location ?
+            temp_ids = [int(self.sptids_dict['<|t2i|>'])] + text_ids[i] + [self.text_tokenizer.eos_token_id]
+
+            if self.max_text_len >= len(temp_ids):
+                temp_ids = [self.pad_id] * (self.max_text_len - len(temp_ids)) + temp_ids
+                temp_masks = [0] * (self.max_text_len - len(temp_ids)) + [1] * len(temp_ids)
+            else:
+                temp_ids = temp_ids[:self.max_text_len - 1] + [self.text_tokenizer.eos_token_id]
+                temp_masks = [1] * len(temp_ids)  # +2 for two special tokens
+
+            # prompting -- [soi][image tokens][eoi] [t2i] [text tokens] [soi][image_masked tokens][eoi]
+            temp_ids = torch.cat([
+                self.sptids_dict['<|soi|>'].to(device),
+                image_ids[i],
+                self.sptids_dict['<|eoi|>'].to(device),
+                torch.tensor(temp_ids).to(device),
+                self.sptids_dict['<|soi|>'].to(device),
+                image_masked_ids[i],
+                self.sptids_dict['<|eoi|>'].to(device)
+            ], dim=0)
+
+            temp_masks = torch.tensor(temp_masks).to(device)
+            sequence_ids.append(temp_ids.unsqueeze(0))
+            attention_masks.append(temp_masks.unsqueeze(0))
+        
+        return torch.cat(sequence_ids, dim=0), torch.cat(attention_masks, dim=0)
 
     def mask_prompt(self):
         pass
@@ -458,6 +496,12 @@ class UniversalPrompting():
             text_ids = self.text_tokenizer(input[0])['input_ids']  # (B, max_len)
             image_ids = input[1]  # (B, #tokens)
             sequence_ids_with_masks = self.lvg_gen_prompt(text_ids, image_ids)
+        
+        elif task == "ti2ss":
+            image_ids = input[0]
+            text_ids = self.text_tokenizer(input[1])['input_ids']
+            image_masked_ids = input[2]
+            sequence_ids_with_masks = self.t2iss_prompt(image_ids, text_ids, image_masked_ids)
         else:
             raise NotImplementedError
 
