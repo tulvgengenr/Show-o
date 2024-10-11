@@ -133,18 +133,19 @@ class Showo(ModelMixin, ConfigMixin):
 
         # for classifier-free guidance
         if uncond_input_ids is not None:
-            uncond_prefix = uncond_input_ids[:, :config.dataset.preprocessing.max_seq_length + 1]
+            uncond_prefix = uncond_input_ids[:, :config.dataset.preprocessing.max_seq_length + 1] # 取出uncond_inout_ids前面的token_id部分，实际上是空
 
         for step in range(timesteps):
             if uncond_input_ids is not None and guidance_scale > 0:
                 uncond_input_ids = torch.cat(
-                    [uncond_prefix, input_ids[:, config.dataset.preprocessing.max_seq_length + 1:]], dim=1)
-                model_input = torch.cat([input_ids, uncond_input_ids])
-                cond_logits, uncond_logits = self(model_input, attention_mask=attention_mask).chunk(2)
+                    [uncond_prefix, input_ids[:, config.dataset.preprocessing.max_seq_length + 1:]], dim=1) # 此时的uncond_input_ids前面的uncond_prefix是空，后面的image部分是input_ids的image部分（并且没有减去llm_vocab_size）
+                model_input = torch.cat([input_ids, uncond_input_ids]) # 送进去的时候token_id是在text vocab + image vocab作为总的vocab下的id
+                cond_logits, uncond_logits = self(model_input, attention_mask=attention_mask).chunk(2) # 所以uncond表示的是没有text的信息
                 # logits = uncond_logits + guidance_scale * (cond_logits - uncond_logits)
                 # it seems that muse has a different cfg setting
                 logits = (1 + guidance_scale) * cond_logits - guidance_scale * uncond_logits
-                logits = logits[:, -(num_vq_tokens + 1):-1, config.model.showo.llm_vocab_size + num_new_special_tokens:-1]
+                logits = logits[:, -(num_vq_tokens + 1):-1, config.model.showo.llm_vocab_size + num_new_special_tokens:-1] # logits输出的是text vocab和image vocab的概率，但是我们只要image vocab的概率
+                # print(f"logit.shape: {logits.shape}")
             else:
                 logits = self(input_ids, attention_mask=attention_mask)
                 logits = logits[:, -(num_vq_tokens + 1):-1, config.model.showo.llm_vocab_size + num_new_special_tokens:-1]
@@ -153,28 +154,39 @@ class Showo(ModelMixin, ConfigMixin):
             sampled = probs.reshape(-1, logits.size(-1))
             sampled_ids = torch.multinomial(sampled, 1, generator=generator)[:, 0].view(*logits.shape[:-1])
 
-            unknown_map = input_ids_minus_lm_vocab_size == mask_token_id
+            unknown_map = input_ids_minus_lm_vocab_size == mask_token_id 
+            print(f"unknown_map: {unknown_map}")
+            # print(f"unknown_map.shape: {unknown_map.shape}")
+
             sampled_ids = torch.where(unknown_map, sampled_ids, input_ids_minus_lm_vocab_size)
+            # print(f"sampled_ids.shape: {sampled_ids.shape}")
+
             # Defines the mask ratio for the next round. The number to mask out is
             # determined by mask_ratio * unknown_number_in_the_beginning.
-            ratio = 1.0 * (step + 1) / timesteps
-            mask_ratio = noise_schedule(torch.tensor(ratio))
+            ratio = 1.0 * (step + 1) / timesteps 
+            mask_ratio = noise_schedule(torch.tensor(ratio)) # mask_ratio = [1/T, 1] * 1/2 *pi, if scheduler is cosine_schedule
             # Computes the probabilities of each selected tokens.
             selected_probs = torch.gather(probs, -1, sampled_ids.long()[..., None])
             selected_probs = selected_probs.squeeze(-1)
-
+            # print(f"selected_probs.shape: {selected_probs.shape}")
+            
             # Ignores the tokens given in the input by overwriting their confidence.
-            selected_probs = torch.where(unknown_map, selected_probs, torch.finfo(selected_probs.dtype).max)
+            selected_probs = torch.where(unknown_map, selected_probs, torch.finfo(selected_probs.dtype).max) # 将不是mask_token_id的地方设置为float类型的最大值
+
             # Gets mask lens for each sample in the batch according to the mask ratio.
-            mask_len = (num_vq_tokens * mask_ratio).floor().unsqueeze(0).to(logits.device)
+            mask_len = (num_vq_tokens * mask_ratio).floor().unsqueeze(0).to(logits.device) # noise schedule体现在mask的sequence的length上
+
             # Keeps at least one of prediction in this round and also masks out at least
             # one and for the next iteration
             mask_len = torch.max(
                 torch.tensor([1], device=logits.device), torch.min(unknown_map.sum(dim=-1, keepdim=True) - 1, mask_len)
-            )
+            ) # mask length最小值为1，最大值为unknown_map中的1的个数-1
+
             # Adds noise for randomness
             temperature = temperature * (1.0 - ratio)
-            masking = mask_by_random_topk(mask_len, selected_probs, temperature, generator=generator)
+            masking = mask_by_random_topk(mask_len, selected_probs, temperature, generator=generator)  # masking为True的地方赋值为mask_token_id, 在下一轮预测
+            # print(f"masking:{masking}")
+
             # Masks tokens with lower confidence.
             input_ids[:, -(num_vq_tokens + 1):-1] = torch.where(masking, mask_token_id,
                                                           sampled_ids + config.model.showo.llm_vocab_size

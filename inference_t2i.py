@@ -109,7 +109,7 @@ if __name__ == '__main__':
         inpainting_mask = inpainting_mask.to(torch.bool)
 
         inpainting_image_tokens = vq_model.get_code(inpainting_image) + len(uni_prompting.text_tokenizer)
-        inpainting_image_tokens[inpainting_mask] = mask_token_id
+        inpainting_image_tokens[inpainting_mask] = mask_token_id # 将mask的部分换为了mask_token_id
 
         input_ids, _ = uni_prompting((prompt, inpainting_image_tokens), 't2i_gen')
 
