@@ -18,10 +18,23 @@ Zhijie Chen<sup>2</sup>&nbsp;
 <sup>1</sup> [Show Lab](https://sites.google.com/view/showlab/home?authuser=0), National University of Singapore&nbsp; <sup>2</sup> Bytedance&nbsp;
  
 [![ArXiv](https://img.shields.io/badge/ArXiv-<2408.12528>-<COLOR>.svg)](https://arxiv.org/abs/2408.12528) [![Webpage](https://img.shields.io/badge/Webpage-Showo-<COLOR>.svg)](https://showlab.github.io/Show-o/) [![Demo](https://img.shields.io/badge/Demo-HuggingFace-<COLOR>.svg)](https://huggingface.co/spaces/showlab/Show-o) [![slack badge](https://img.shields.io/badge/Discord-join-blueviolet?logo=discord&amp)](https://discord.gg/p6k7XupM) [![WeChat badge](https://img.shields.io/badge/微信-加入-green?logo=wechat&amp)](https://github.com/showlab/Show-o/blob/main/docs/wechat_qa_3.jpg) [![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2Fshowlab%2FShow-o&count_bg=%234DC621&title_bg=%23811AD2&icon=&icon_color=%23E7E7E7&title=hits&edge_flat=false)](https://hits.seeyoufarm.com)
-
+ 
 </div>
 
-**News**
+## News
+* **[2024-10-13]** Update Arxiv paper to include new features and experimental results.
+  * Support image generation in a resolution of 512x512.
+  <p align="center"> <img src="docs/show-o-512x512-t2i.png" width="666"></p>
+  
+  * Improve the multimodal understanding capabilities of purely discrete Show-o.
+  <p align="center"> <img src="docs/show-o-512x512-mmu.png" width="666"></p>
+  
+  * Explore the impact of dataset scale and image resolution on multimodal understanding capabilities of discrete image tokens. For more information, please refer to the paper.
+  <p align="center"> <img src="docs/show-o-ablation.png" width="666"></p>
+  
+  * We release [the weight of Show-o](https://huggingface.co/showlab/show-o-512x512-wo-llava-tuning) before fine-tuning on LLaVA instructional tuning datasets. You can fine-tune it following the configurations in `./configs`.
+  
+
 * **[2024-09-12]** Arxiv paper updated to include preliminaries about discrete diffusion.
 * **[2024-09-03]** We deploy an online demo on [Hugging Face Space](https://huggingface.co/spaces/showlab/Show-o). 🤗 Have fun!
 * **[2024-09-02]** **We release the training code for pre-training and instruction tuning!** 🔥🔥
@@ -46,12 +59,15 @@ Below is an overview of **Show-o**. The input data, regardless of its modalities
 ## TODO
 - [X] Release the inference code.
 - [X] Release the training code.
+- [X] Support image generation in a resolution of 512x512.
 - [ ] Scale up the model size (based on LLaMA3) and increase the number of training data.
 
 ## Hugging Face models
 
 The Show-o checkpoints can be found on [Hugging Face](https://huggingface.co/showlab):
-
+* [showlab/show-o-512x512](https://huggingface.co/showlab/show-o-512x512)
+* [showlab/show-o-w-clip-vit-512x512](https://huggingface.co/showlab/show-o-w-clip-vit-512x512)
+* [showlab/show-o-512x512-wo-llava-tuning](https://huggingface.co/showlab/show-o-512x512-wo-llava-tuning)
 * [showlab/show-o](https://huggingface.co/showlab/show-o)
 * [showlab/show-o-w-clip-vit](https://huggingface.co/showlab/show-o-w-clip-vit)
 * [showlab/magvitv2](https://huggingface.co/showlab/magvitv2)
@@ -67,16 +83,16 @@ wandb login <your wandb keys>
 ```
 Inference demo for **Multimodal Understanding** and you can view the results on wandb.
 ```
-python3 inference_mmu.py config=configs/showo_demo_w_clip_vit.yaml \
+python3 inference_mmu.py config=configs/showo_demo_w_clip_vit_512x512.yaml \
 mmu_image_root=./mmu_validation question='Please describe this image in detail. *** Do you think the image is unusual or not?'
 ```
 <img src="docs/github_mmu.png" width="1000">
 
-Inference demo for **Text-to-Image Generation** and you can view the results (in a resolution of 256x256) on wandb.
+Inference demo for **Text-to-Image Generation** and you can view the results (in a resolution of 512x512) on wandb.
 ```
-python3 inference_t2i.py config=configs/showo_demo.yaml \
+python3 inference_t2i.py config=configs/showo_demo_512x512.yaml \
 batch_size=1 validation_prompts_file=validation_prompts/showoprompts.txt \
-guidance_scale=1.75 generation_timesteps=18 \
+guidance_scale=5 generation_timesteps=50 \
 mode='t2i'
 ```
 <img src="docs/github_t2i.png" width="1000">
