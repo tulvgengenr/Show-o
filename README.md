@@ -83,7 +83,16 @@ wandb login <your wandb keys>
 ```
 Inference demo for **Multimodal Understanding** and you can view the results on wandb.
 ```
+option (c)
+
 python3 inference_mmu.py config=configs/showo_demo_w_clip_vit_512x512.yaml \
+max_new_tokens=100 \
+mmu_image_root=./mmu_validation question='Please describe this image in detail. *** Do you think the image is unusual or not?'
+
+or option (a)
+
+python3 inference_mmu.py config=configs/showo_demo_512x512.yaml \
+max_new_tokens=100 \
 mmu_image_root=./mmu_validation question='Please describe this image in detail. *** Do you think the image is unusual or not?'
 ```
 <img src="docs/github_mmu.png" width="1000">
@@ -202,4 +211,4 @@ To cite the paper and model, please use the below:
 }
 ```
 ### Acknowledgments
-This work is heavily based on [open-muse](https://github.com/huggingface/open-muse), [Phi-1.5](https://huggingface.co/microsoft/phi-1_5), [muse-maskgit-pytorch](https://github.com/lucidrains/muse-maskgit-pytorch), [maskgit](https://github.com/google-research/maskgit), [taming-transformers](https://github.com/CompVis/taming-transformers), [transformers](https://github.com/huggingface/transformers), [accelerate](https://github.com/huggingface/accelerate), [diffusers](https://github.com/huggingface/diffusers), and [webdatset](https://github.com/webdataset/webdataset). Thanks to all the authors for their great work.
+This work is heavily based on [open-muse](https://github.com/huggingface/open-muse), [Phi-1.5](https://huggingface.co/microsoft/phi-1_5), [muse-maskgit-pytorch](https://github.com/lucidrains/muse-maskgit-pytorch), [maskgit](https://github.com/google-research/maskgit), [taming-transformers](https://github.com/CompVis/taming-transformers), [transformers](https://github.com/huggingface/transformers), [accelerate](https://github.com/huggingface/accelerate), [diffusers](https://github.com/huggingface/diffusers), and [webdataset](https://github.com/webdataset/webdataset). Thanks to all the authors for their great work.
