@@ -37,6 +37,7 @@ model:
 dataset:
     gen_type: "t2i"
     und_type: "llava_tuning"
+    ti2ss_type: "tuning"
     combined_loader_mode: "min_size"
     add_system_prompt: False
     params:
@@ -46,6 +47,7 @@ dataset:
                                         "/mnt/bn/vgfm/cc12m/images/{00000..01242}.tar",
                                         "/mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar" ]
         train_lm_shards_path_or_url: "/mnt/bn/vgfm2/test_mlx/xavier/data/falcon-refinedweb/data/*.parquet"
+        train_ti2ss_shards_path_or_url: "datasets/ade"
         add_caption_prompt: True
         external_caption_path: "/mnt/bn/vgfm2/test_mlx/xavier/data/SAM-LLaVA-Captions10M"
         external_journeydb_caption_path: "/mnt/bn/vgfm2/test_mlx/xavier/code/3062/open_muse/train_journeydb_anno.json"
@@ -82,9 +84,10 @@ lr_scheduler:
 
 training:
     gradient_accumulation_steps: 1
-    batch_size_t2i: 4
-    batch_size_lm: 2
-    batch_size_mmu: 6
+    batch_size_ti2ss: 4 
+    batch_size_t2i: 0
+    batch_size_lm: 0
+    batch_size_mmu: 0
     mixed_precision: "bf16"
     enable_tf32: True
     seed: 10086

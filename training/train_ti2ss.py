@@ -98,9 +98,10 @@ def main():
 
     total_batch_size_per_gpu = (config.training.batch_size_t2i
                                 + config.training.batch_size_lm
-                                + config.training.batch_size_mmu)
+                                + config.training.batch_size_mmu
+                                + config.training.batch_size_ti2ss)
     total_batch_size = (
-            (config.training.batch_size_t2i + config.training.batch_size_lm + config.training.batch_size_mmu)
+            (config.training.batch_size_t2i + config.training.batch_size_lm + config.training.batch_size_mmu + config.training.batch_size_ti2ss)
             * accelerator.num_processes * config.training.gradient_accumulation_steps
     )
 
@@ -259,6 +260,9 @@ def main():
     total_batch_size_t2i = (
             config.training.batch_size_t2i * accelerator.num_processes * config.training.gradient_accumulation_steps
     )
+    total_batch_size_ti2ss = (
+        config.training.batch_size_ti2ss * accelerator.num_processes * config.training.gradient_accumulation_steps
+    )
 
     # DataLoaders creation:
     # We use webdataset for data loading. The dataloaders are created with sampling with replacement.
@@ -411,11 +415,16 @@ def main():
                                                       sampler=None, collate_fn=dataset_lm.collate_fn,
                                                       num_workers=dataset_config.num_workers)
 
+    # Data for ti2ss
+    if config.dataset.ti2ss_type == "tuning":
+        train_dataloader_ti2ss = 
+
     # Combine these dataloaders into a single iterable model
     iterables = {
         "t2i_flow": train_dataloader_t2i,
         "lm_flow": train_dataloader_lm,
         "mmu_flow": train_dataloader_mmu,
+        "ti2ss_flow": train_dataloader_ti2ss,
     }
 
     combined_dataloader = CombinedLoader(iterables, mode=config.dataset.combined_loader_mode)
@@ -498,6 +507,7 @@ def main():
             batch_size_t2i = batch["t2i_flow"]["images"].shape[0]
             batch_size_lm = len(batch["lm_flow"]["input_ids"])
             batch_size_mmu = batch["mmu_flow"]["images"].shape[0]
+            batch_size_ti2ss = batch["ti2ss_flow"]["images"].shape[0]
 
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             # Build formatted sequences for class-conditional/text-to-image generation
@@ -506,6 +516,10 @@ def main():
             pixel_values = pixel_values.to(accelerator.device, non_blocking=True)
             data_time_m.update(time.time() - end)
 
+            pixel_values_ti2ss, texts_ti2ss, annotations_ti2ss = batch["ti2ss_flow"]["images"], batch["ti2ss_flow"]["input_ids"], batch["ti2ss_flow"]["labels"]
+            pixel_values_ti2ss = pixel_values_ti2ss.to(accelerator.device, non_blocking=True)
+            data_time_m.update(time.time() - end)
+            
             # Encode images to image tokens, mask them and create input and labels
             (
                 input_ids,
@@ -520,6 +534,13 @@ def main():
                                                                 rm_pad_in_image=True,
                                                                 return_inverse_mask=True)
             attention_mask = attention_mask.to(mask_dtype)
+
+            (
+                input_ids,
+                labels,
+                mask_prob,
+                image_tokens_ori
+            ) = prepare_inputs_and_labels(pixel_values_ti2ss, texts_ti2ss, )
 
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             # Build formatted sequences for language modeling
