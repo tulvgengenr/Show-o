@@ -13,11 +13,7 @@ from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 from training.utils import image_transform
 from llava.llava import conversation as conversation_lib
-from mmseg.datasets import ADE20KDataset
-from mmengine.registry import init_default_scope
-from mmseg.structures import SegDataSample
 
-init_default_scope('mmseg')
 
 DEFAULT_IMAGE_TOKEN = "<image>"
 IGNORE_INDEX = -100
@@ -268,86 +264,6 @@ def get_instruct_data_loader(
             tokenizer=tokenizer,
             max_length=max_length,
         ),
-        sampler=datasampler
-    )
-
-    return dataloader
-
-class CustomADE20KDataset(ADE20KDataset):
-    def __init__(self, data_root, resolution=512):
-        img_norm_cfg = dict(
-            mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
-        )
-        crop_size = (resolution, resolution)
-
-        # set ratio_range
-        ratio_range = (0.5, 2.0)
-        ratio = random.uniform(ratio_range[0], ratio_range[1])
-        if ratio < 1:
-            scale_factor = (ratio, 1)
-        else:
-            scale_factor = (1, 1 / ratio)
-
-        train_pipeline = [
-            dict(type='LoadImageFromFile'),
-            dict(type='LoadAnnotations'),
-            dict(type='Resize', 
-                 scale=(2048, 512), 
-                 scale_factor=scale_factor,
-                 keep_ratio=False,
-            ),
-            dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
-            dict(type='RandomFlip', prob=0.5),
-            dict(type='PhotoMetricDistortion'),
-            dict(type='Normalize', **img_norm_cfg),
-            dict(type='Pad', size=crop_size, pad_val=dict(img=0, seg=255)),
-            dict(type='PackSegInputs')
-        ]
-
-        super().__init__(
-            data_root = data_root,
-            data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
-            img_suffix='.jpg',
-            seg_map_suffix='.png',
-            reduce_zero_label=True,
-            pipeline=train_pipeline,
-        )
-
-    def __getitem__(self, idx):
-        data = super().__getitem__(idx)
-
-        image_ts = data['inputs']
-
-        data_sample:SegDataSample = data['data_samples']
-
-        seg_map_ts = data_sample.gt_sem_seg.data
-        
-        
-        return dict(image=image_ts, seg_map=seg_map_ts, data_samples=data_sample)
-        
-
-def get_ti2ss_data_loader(
-    train_ti2ss_shards_path_or_url,
-    batch_size,
-    num_workers,
-    world_size,
-    local_rank,
-):  
-    # TODO: add more datasets
-    train_dataset = ADE20KDataset(
-        data_root = train_ti2ss_shards_path_or_url,
-        data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
-        img_suffix='.jpg',
-        seg_map_suffix='.png',
-        reduce_zero_label=True,
-    )
-
-    datasampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank)
-    dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
         sampler=datasampler
     )
 
