@@ -1,7 +1,7 @@
 wandb:
   entity: null
   resume: auto
-  run_id: rz48yg4p
+  run_id: tri4r1u9
 experiment:
   project: tuning
   name: show-o-tuning-stage2
