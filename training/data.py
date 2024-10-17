@@ -40,7 +40,6 @@ from webdataset.tariterators import (
     url_opener,
     valid_sample,
 )
-from mmseg
 
 person_token = ["a person", "someone", "somebody"]
 
@@ -338,11 +337,6 @@ class Text2ImageDataset:
     @property
     def train_dataloader(self):
         return self._train_dataloader
-    
-class TextImage2SemSeg:
-    def __init__():
-
-
 
 if __name__ == '__main__':
     pass

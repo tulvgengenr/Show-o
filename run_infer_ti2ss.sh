@@ -1,4 +1,5 @@
 #! /bin/sh
+
 # python3 inference_ti2ss.py \
 #     config=configs/showo_demo.yaml \
 #     batch_size=1 \

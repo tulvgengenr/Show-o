@@ -12,6 +12,7 @@ from torch.utils.data import Dataset
 from torch.utils.data.distributed import DistributedSampler
 from training.utils import image_transform
 from llava.llava import conversation as conversation_lib
+from mmseg.datasets import ADE20KDataset
 
 DEFAULT_IMAGE_TOKEN = "<image>"
 IGNORE_INDEX = -100
@@ -266,6 +267,55 @@ def get_instruct_data_loader(
     )
 
     return dataloader
+
+class CustomADE20KDataset(ADE20KDataset):
+    def __init__(self, dataroot):
+        super(CustomADE20KDataset, self).__init__(
+            dataroot=dataroot,
+            data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
+            img_suffix='.jpg',
+            seg_map_suffix='.png',
+            reduce_zero_label=True,
+        )
+
+    def __getitem__(self, idx):
+        data = super(CustomADE20KDataset, self).__getitem__(idx)
+        img_path = data['img_info']['filename']
+        full_img_path = os.path.join(self.data_root, self.data_prefix['img_path'], img_path)
+        try:
+            image = Image.open(full_img_path).convert('RGB')
+            image = image_transform(image, resolution=512)
+        except Exception as e:
+            print(f"Error loading image {full_img_path}: {e}")
+            image = torch.zeros(3, 512, 512)
+
+        data['imge'] = image
+
+        return data
+
+    def __len__(self):
+        return super(CustomADE20KDataset, self).__len__()
+        
+
+def get_ti2ss_data_loader(
+    train_ti2ss_shards_path_or_url,
+    # batch_size,
+    # num_workers,
+    # world_size,
+    # local_rank,
+):
+    train_dataset = ADE20KDataset(
+        data_root = train_ti2ss_shards_path_or_url,
+        data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
+        img_suffix='.jpg',
+        seg_map_suffix='.png',
+        reduce_zero_label=True,
+    )
+
+    print(len(train_dataset))
+
+        
+    
 
 
 if __name__ == '__main__':

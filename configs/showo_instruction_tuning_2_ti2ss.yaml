@@ -22,8 +22,8 @@ model:
         vq_model_name: "showlab/magvitv2"
 
     showo:
-        load_from_showo: False
-        pretrained_model_path: "showlab/show-o"
+        load_from_showo: True
+        pretrained_model_path: "showlab/show-o-512x512-wo-llava-tuning"
         w_clip_vit: False
         vocab_size: 58498
         llm_vocab_size: 50295
@@ -47,7 +47,7 @@ dataset:
                                         "/mnt/bn/vgfm/cc12m/images/{00000..01242}.tar",
                                         "/mnt/bn/vgfm/laion5b/laion-aesthetics-12m-images/{00000..01209}.tar" ]
         train_lm_shards_path_or_url: "/mnt/bn/vgfm2/test_mlx/xavier/data/falcon-refinedweb/data/*.parquet"
-        train_ti2ss_shards_path_or_url: "datasets/ade"
+        train_ti2ss_shards_path_or_url: "/data/junzhe/datasets/ade/ADEChallengeData2016"
         add_caption_prompt: True
         external_caption_path: "/mnt/bn/vgfm2/test_mlx/xavier/data/SAM-LLaVA-Captions10M"
         external_journeydb_caption_path: "/mnt/bn/vgfm2/test_mlx/xavier/code/3062/open_muse/train_journeydb_anno.json"

@@ -39,7 +39,7 @@ from accelerate.utils import DistributedType, set_seed
 
 from training.data import Text2ImageDataset
 from training.imagenet_dataset import ImageNetDataset
-from parquet import RefinedWebDataset
+# from parquet import RefinedWebDataset
 
 from models import Showo, MAGVITv2, get_mask_chedule
 from training.prompting_utils import UniversalPrompting, create_attention_mask_predict_next, \
@@ -271,159 +271,160 @@ def main():
     preproc_config = config.dataset.preprocessing
     dataset_config = config.dataset.params
 
-    # Data for generation
-    if config.dataset.gen_type == "t2i":
-        dataset = Text2ImageDataset(
-            train_shards_path_or_url=dataset_config.train_t2i_shards_path_or_url,
-            tokenizer=None,  # we want to get raw texts
-            max_seq_length=preproc_config.max_seq_length,
-            num_train_examples=config.experiment.max_train_examples_t2i,
-            per_gpu_batch_size=config.training.batch_size_t2i,
-            global_batch_size=total_batch_size_t2i_without_accum,
-            num_workers=dataset_config.num_workers,
-            resolution=preproc_config.resolution,
-            shuffle_buffer_size=dataset_config.shuffle_buffer_size,
-            pin_memory=dataset_config.pin_memory,
-            persistent_workers=dataset_config.persistent_workers,
-            external_caption_path=dataset_config.external_caption_path,
-            external_journeydb_caption_path=dataset_config.external_journeydb_caption_path,
-            external_laion12m_caption_path=dataset_config.external_laion12m_caption_path,
-            external_cc12m_caption_path=dataset_config.external_cc12m_caption_path,
-        )
-        train_dataloader_t2i = dataset.train_dataloader
-        num_update_steps_per_epoch = math.ceil(
-            train_dataloader_t2i.num_batches / config.training.gradient_accumulation_steps)
-        num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
+    # # Data for generation
+    # if config.dataset.gen_type == "t2i":
+    #     dataset = Text2ImageDataset(
+    #         train_shards_path_or_url=dataset_config.train_t2i_shards_path_or_url,
+    #         tokenizer=None,  # we want to get raw texts
+    #         max_seq_length=preproc_config.max_seq_length,
+    #         num_train_examples=config.experiment.max_train_examples_t2i,
+    #         per_gpu_batch_size=config.training.batch_size_t2i,
+    #         global_batch_size=total_batch_size_t2i_without_accum,
+    #         num_workers=dataset_config.num_workers,
+    #         resolution=preproc_config.resolution,
+    #         shuffle_buffer_size=dataset_config.shuffle_buffer_size,
+    #         pin_memory=dataset_config.pin_memory,
+    #         persistent_workers=dataset_config.persistent_workers,
+    #         external_caption_path=dataset_config.external_caption_path,
+    #         external_journeydb_caption_path=dataset_config.external_journeydb_caption_path,
+    #         external_laion12m_caption_path=dataset_config.external_laion12m_caption_path,
+    #         external_cc12m_caption_path=dataset_config.external_cc12m_caption_path,
+    #     )
+    #     train_dataloader_t2i = dataset.train_dataloader
+    #     num_update_steps_per_epoch = math.ceil(
+    #         train_dataloader_t2i.num_batches / config.training.gradient_accumulation_steps)
+    #     num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
 
-    elif config.dataset.gen_type == "t2i_parquet":
-        # this part relies on the internal packages, which will not be released
-        num_update_steps_per_epoch = math.ceil(config.experiment.max_train_examples_t2i / total_batch_size_t2i)
-        num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
+    # elif config.dataset.gen_type == "t2i_parquet":
+    #     # this part relies on the internal packages, which will not be released
+    #     num_update_steps_per_epoch = math.ceil(config.experiment.max_train_examples_t2i / total_batch_size_t2i)
+    #     num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
 
-        train_dataloader_t2i = create_imagetext_dataloader(
-            train_shards_path_or_url=dataset_config.train_t2i_shards_path_or_url,
-            batch_size=config.training.batch_size_t2i,
-            image_size=preproc_config.resolution,
-            num_workers=dataset_config.num_workers,
-            num_readers=32,
-            predefined_steps=num_update_steps_per_epoch,
-            drop_last=True,
-            shuffle=True,
-            shuffle_buffer_size=dataset_config.shuffle_buffer_size
-        )
+    #     train_dataloader_t2i = create_imagetext_dataloader(
+    #         train_shards_path_or_url=dataset_config.train_t2i_shards_path_or_url,
+    #         batch_size=config.training.batch_size_t2i,
+    #         image_size=preproc_config.resolution,
+    #         num_workers=dataset_config.num_workers,
+    #         num_readers=32,
+    #         predefined_steps=num_update_steps_per_epoch,
+    #         drop_last=True,
+    #         shuffle=True,
+    #         shuffle_buffer_size=dataset_config.shuffle_buffer_size
+    #     )
 
-    elif config.dataset.gen_type == "imagenet1k":
-        dataset_imagenet = ImageNetDataset(
-            dataset_config.train_t2i_shards_path_or_url,
-            image_size=preproc_config.resolution,
-        )
+    # elif config.dataset.gen_type == "imagenet1k":
+    #     dataset_imagenet = ImageNetDataset(
+    #         dataset_config.train_t2i_shards_path_or_url,
+    #         image_size=preproc_config.resolution,
+    #     )
 
-        print('process index : ',
-              accelerator.process_index, ', ', accelerator.num_processes,
-              "Length: ", len(dataset_imagenet))
+    #     print('process index : ',
+    #           accelerator.process_index, ', ', accelerator.num_processes,
+    #           "Length: ", len(dataset_imagenet))
 
-        if accelerator.num_processes > 1:
-            sampler = DistributedSampler(dataset_imagenet,
-                                         num_replicas=accelerator.num_processes,
-                                         rank=accelerator.process_index,
-                                         shuffle=True,
-                                         )
-            shuffle = False
-        else:
-            sampler = None
-            shuffle = True
+    #     if accelerator.num_processes > 1:
+    #         sampler = DistributedSampler(dataset_imagenet,
+    #                                      num_replicas=accelerator.num_processes,
+    #                                      rank=accelerator.process_index,
+    #                                      shuffle=True,
+    #                                      )
+    #         shuffle = False
+    #     else:
+    #         sampler = None
+    #         shuffle = True
 
-        train_dataloader_t2i = DataLoader(dataset_imagenet, batch_size=config.training.batch_size_t2i,
-                                          sampler=sampler, collate_fn=dataset_imagenet.collate_fn,
-                                          shuffle=shuffle, num_workers=dataset_config.num_workers)
-        num_update_steps_per_epoch = math.ceil(len(dataset_imagenet) / total_batch_size_t2i)
-        num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
+    #     train_dataloader_t2i = DataLoader(dataset_imagenet, batch_size=config.training.batch_size_t2i,
+    #                                       sampler=sampler, collate_fn=dataset_imagenet.collate_fn,
+    #                                       shuffle=shuffle, num_workers=dataset_config.num_workers)
+    #     num_update_steps_per_epoch = math.ceil(len(dataset_imagenet) / total_batch_size_t2i)
+    #     num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)
 
-    else:
-        raise ValueError(f"Unsupported dataset type {config.dataset.type}")
+    # else:
+    #     raise ValueError(f"Unsupported dataset type {config.dataset.type}")
 
-    total_batch_size_mmu_without_accum = config.training.batch_size_mmu * accelerator.num_processes
-    # Data for image captioning
-    if config.dataset.und_type == "captioning":
-        dataset_mmu = Text2ImageDataset(
-            train_shards_path_or_url=dataset_config.train_mmu_shards_path_or_url,
-            tokenizer=None,  # we want to get raw texts
-            max_seq_length=preproc_config.max_seq_length,
-            num_train_examples=config.experiment.max_train_examples_mmu,
-            per_gpu_batch_size=config.training.batch_size_mmu,
-            global_batch_size=total_batch_size_mmu_without_accum,
-            num_workers=dataset_config.num_workers,
-            resolution=preproc_config.resolution,
-            shuffle_buffer_size=dataset_config.shuffle_buffer_size,
-            pin_memory=dataset_config.pin_memory,
-            persistent_workers=dataset_config.persistent_workers,
-            external_caption_path=dataset_config.external_caption_path,
-            external_journeydb_caption_path=dataset_config.external_journeydb_caption_path,
-            external_laion12m_caption_path=dataset_config.external_laion12m_caption_path,
-            external_cc12m_caption_path=dataset_config.external_cc12m_caption_path,
-            is_captioning=True,
-            add_caption_prompt=dataset_config.add_caption_prompt,
-        )
-        train_dataloader_mmu = dataset_mmu.train_dataloader
+    # total_batch_size_mmu_without_accum = config.training.batch_size_mmu * accelerator.num_processes
+    # # Data for image captioning
+    # if config.dataset.und_type == "captioning":
+    #     dataset_mmu = Text2ImageDataset(
+    #         train_shards_path_or_url=dataset_config.train_mmu_shards_path_or_url,
+    #         tokenizer=None,  # we want to get raw texts
+    #         max_seq_length=preproc_config.max_seq_length,
+    #         num_train_examples=config.experiment.max_train_examples_mmu,
+    #         per_gpu_batch_size=config.training.batch_size_mmu,
+    #         global_batch_size=total_batch_size_mmu_without_accum,
+    #         num_workers=dataset_config.num_workers,
+    #         resolution=preproc_config.resolution,
+    #         shuffle_buffer_size=dataset_config.shuffle_buffer_size,
+    #         pin_memory=dataset_config.pin_memory,
+    #         persistent_workers=dataset_config.persistent_workers,
+    #         external_caption_path=dataset_config.external_caption_path,
+    #         external_journeydb_caption_path=dataset_config.external_journeydb_caption_path,
+    #         external_laion12m_caption_path=dataset_config.external_laion12m_caption_path,
+    #         external_cc12m_caption_path=dataset_config.external_cc12m_caption_path,
+    #         is_captioning=True,
+    #         add_caption_prompt=dataset_config.add_caption_prompt,
+    #     )
+    #     train_dataloader_mmu = dataset_mmu.train_dataloader
 
-    elif config.dataset.und_type == "captioning_parquet":
-        train_dataloader_mmu = create_imagetext_dataloader(
-            train_shards_path_or_url=dataset_config.train_mmu_shards_path_or_url,
-            batch_size=config.training.batch_size_mmu,
-            image_size=preproc_config.resolution,
-            num_workers=dataset_config.num_workers,
-            num_readers=32,
-            predefined_steps=num_update_steps_per_epoch,
-            drop_last=True,
-            shuffle=True,
-            shuffle_buffer_size=dataset_config.shuffle_buffer_size,
-            is_captioning=True
-        )
+    # elif config.dataset.und_type == "captioning_parquet":
+    #     train_dataloader_mmu = create_imagetext_dataloader(
+    #         train_shards_path_or_url=dataset_config.train_mmu_shards_path_or_url,
+    #         batch_size=config.training.batch_size_mmu,
+    #         image_size=preproc_config.resolution,
+    #         num_workers=dataset_config.num_workers,
+    #         num_readers=32,
+    #         predefined_steps=num_update_steps_per_epoch,
+    #         drop_last=True,
+    #         shuffle=True,
+    #         shuffle_buffer_size=dataset_config.shuffle_buffer_size,
+    #         is_captioning=True
+    #     )
 
-    elif config.dataset.und_type == "llava_pretrain":
-        train_dataloader_mmu = get_instruct_data_loader(
-            tokenizer,
-            batch_size=config.training.batch_size_mmu,
-            num_workers=dataset_config.num_workers,
-            world_size=accelerator.num_processes,
-            local_rank=accelerator.process_index,
-            max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
-            phase="pretrain"
-        )
+    # elif config.dataset.und_type == "llava_pretrain":
+    #     train_dataloader_mmu = get_instruct_data_loader(
+    #         tokenizer,
+    #         batch_size=config.training.batch_size_mmu,
+    #         num_workers=dataset_config.num_workers,
+    #         world_size=accelerator.num_processes,
+    #         local_rank=accelerator.process_index,
+    #         max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
+    #         phase="pretrain"
+    #     )
 
-    elif config.dataset.und_type == "llava_tuning":
-        train_dataloader_mmu = get_instruct_data_loader(
-            tokenizer,
-            batch_size=config.training.batch_size_mmu,
-            num_workers=dataset_config.num_workers,
-            world_size=accelerator.num_processes,
-            local_rank=accelerator.process_index,
-            max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
-            phase="tuning"
-        )
+    # elif config.dataset.und_type == "llava_tuning":
+    #     train_dataloader_mmu = get_instruct_data_loader(
+    #         tokenizer,
+    #         batch_size=config.training.batch_size_mmu,
+    #         num_workers=dataset_config.num_workers,
+    #         world_size=accelerator.num_processes,
+    #         local_rank=accelerator.process_index,
+    #         max_length=preproc_config.max_seq_length if config.dataset.add_system_prompt else preproc_config.max_seq_length + SYSTEM_PROMPT_LEN,
+    #         phase="tuning"
+    #     )
 
-    else:
-        raise NotImplementedError(f"Unsupported dataset type {config.dataset.und_type}")
+    # else:
+    #     raise NotImplementedError(f"Unsupported dataset type {config.dataset.und_type}")
 
     # LLM pure text dataset: RefinedWeb
-    dataset_lm = RefinedWebDataset(data_path=dataset_config.train_lm_shards_path_or_url,
-                                   rank=accelerator.process_index,
-                                   world_size=accelerator.num_processes,
-                                   num_workers=dataset_config.num_workers)
+    # dataset_lm = RefinedWebDataset(data_path=dataset_config.train_lm_shards_path_or_url,
+    #                                rank=accelerator.process_index,
+    #                                world_size=accelerator.num_processes,
+    #                                num_workers=dataset_config.num_workers)
 
-    train_dataloader_lm = torch.utils.data.DataLoader(dataset_lm, batch_size=config.training.batch_size_lm,
-                                                      sampler=None, collate_fn=dataset_lm.collate_fn,
-                                                      num_workers=dataset_config.num_workers)
+    # train_dataloader_lm = torch.utils.data.DataLoader(dataset_lm, batch_size=config.training.batch_size_lm,
+    #                                                   sampler=None, collate_fn=dataset_lm.collate_fn,
+    #                                                   num_workers=dataset_config.num_workers)
 
     # Data for ti2ss
     if config.dataset.ti2ss_type == "tuning":
-        train_dataloader_ti2ss = 
+        print(f"flag")
+        exit()
 
     # Combine these dataloaders into a single iterable model
     iterables = {
-        "t2i_flow": train_dataloader_t2i,
-        "lm_flow": train_dataloader_lm,
-        "mmu_flow": train_dataloader_mmu,
+        # "t2i_flow": train_dataloader_t2i,
+        # "lm_flow": train_dataloader_lm,
+        # "mmu_flow": train_dataloader_mmu,
         "ti2ss_flow": train_dataloader_ti2ss,
     }
 
@@ -919,4 +920,12 @@ def log_grad_norm(model, accelerator, global_step):
 
 
 if __name__ == "__main__":
-    main()
+    try: 
+        main()
+    except Exception as e:
+        print(e)
+        import traceback
+        traceback.print_exc()
+        os._exit(1)
+    finally: 
+        wandb.finish()
