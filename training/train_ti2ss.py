@@ -32,12 +32,12 @@ import torch
 from torch.optim import AdamW
 from lightning.pytorch.utilities import CombinedLoader
 
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoProcessor, Blip2ForConditionalGeneration
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedType, set_seed
 
-from training.data import Text2ImageDataset
+from training.data import Text2ImageDataset, CustomADE20KDataset
 from training.imagenet_dataset import ImageNetDataset
 # from parquet import RefinedWebDataset
 
@@ -50,7 +50,7 @@ from models.logging import set_verbosity_info, set_verbosity_error
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
-from llava.llava_data_vq_unified import get_instruct_data_loader, get_ti2ss_data_loader
+from llava.llava_data_vq_unified import get_instruct_data_loader
 
 SYSTEM_PROMPT_LEN = 28
 
@@ -178,79 +178,87 @@ def main():
 
     print('special tokens : \n', uni_prompting.sptids_dict)
 
-    # # VQ model for processing image into discrete tokens
-    # vq_model = get_vq_model_class(config.model.vq_model.type)
-    # if config.model.vq_model.get("pretrained_model_path", None):
-    #     vq_model = vq_model().to(accelerator.device)
-    #     state_dict = torch.load(config.model.vq_model.pretrained_model_path)['model']
-    #     vq_model.load_state_dict(state_dict)
-    # else:
-    #     vq_model = vq_model.from_pretrained(config.model.vq_model.vq_model_name).to(accelerator.device)
-    # vq_model.eval()
-    # vq_model.requires_grad_(False)
+    # VQ model for processing image into discrete tokens
+    vq_model = get_vq_model_class(config.model.vq_model.type)
+    if config.model.vq_model.get("pretrained_model_path", None):
+        vq_model = vq_model().to(accelerator.device)
+        state_dict = torch.load(config.model.vq_model.pretrained_model_path)['model']
+        vq_model.load_state_dict(state_dict)
+    else:
+        vq_model = vq_model.from_pretrained(config.model.vq_model.vq_model_name).to(accelerator.device)
+    vq_model.eval()
+    vq_model.requires_grad_(False)
 
+    # Initialize Show-o model
+    if config.model.showo.load_from_showo:
+        model = Showo.from_pretrained(config.model.showo.pretrained_model_path).to(accelerator.device)
+        if config.model.showo.vocab_size != model.vocab_size:
+            model.showo.resize_token_embeddings(config.model.showo.vocab_size)
+            model.config.codebook_size = config.model.showo.codebook_size
+            model.config.vocab_size = config.model.showo.vocab_size
+            model.vocab_size = config.model.showo.vocab_size
+            model.output_size = config.model.showo.vocab_size
+            model.config.mask_token_id = config.model.showo.vocab_size - 1
+            model.mask_token_id = config.model.showo.vocab_size - 1
+    else:
+        model = Showo(**config.model.showo).to(accelerator.device)
+    mask_id = model.mask_token_id
 
-    # # Initialize Show-o model
-    # if config.model.showo.load_from_showo:
-    #     model = Showo.from_pretrained(config.model.showo.pretrained_model_path).to(accelerator.device)
-    #     if config.model.showo.vocab_size != model.vocab_size:
-    #         model.showo.resize_token_embeddings(config.model.showo.vocab_size)
-    #         model.config.codebook_size = config.model.showo.codebook_size
-    #         model.config.vocab_size = config.model.showo.vocab_size
-    #         model.vocab_size = config.model.showo.vocab_size
-    #         model.output_size = config.model.showo.vocab_size
-    #         model.config.mask_token_id = config.model.showo.vocab_size - 1
-    #         model.mask_token_id = config.model.showo.vocab_size - 1
-    # else:
-    #     model = Showo(**config.model.showo).to(accelerator.device)
-    # mask_id = model.mask_token_id
+    # BLIP2 for ti2ss
+    if hasattr(model, 'module'):
+        blip2_dtype = model.module.showo.model.embed_tokens.weight.dtype
+    else:
+        blip2_dtype = model.showo.model.embed_tokens.weight.dtype
 
-    # ##################################
-    # #   Optimizer and LR scheduler   #
-    # #################################
-    # optimizer_config = config.optimizer.params
+    blip2_processor = AutoProcessor.from_pretrained(config.model.blip2.pretrained_model_path)
+    blip2_model = Blip2ForConditionalGeneration.from_pretrained(config.model.blip2.pretrained_model_path, torch_dtype=blip2_dtype).to(accelerator.device)
 
-    # # no decay on bias and layernorm and embedding
-    # no_decay = ["bias", "layer_norm.weight", "mlm_ln.weight", "embeddings.weight"]
-    # optimizer_grouped_parameters = [
-    #     {
-    #         "params": [p for n, p in model.named_parameters() if
-    #                    p.requires_grad and not any(nd in n for nd in no_decay)],
-    #         "weight_decay": optimizer_config.weight_decay,
-    #     },
-    #     {
-    #         "params": [p for n, p in model.named_parameters() if
-    #                    p.requires_grad and any(nd in n for nd in no_decay)],
-    #         "weight_decay": 0.0,
-    #     },
-    # ]
+    ##################################
+    #   Optimizer and LR scheduler   #
+    #################################
+    optimizer_config = config.optimizer.params
 
-    # optimizer_type = config.optimizer.name
-    # if optimizer_type == "adamw":
-    #     optimizer = AdamW(
-    #         optimizer_grouped_parameters,
-    #         lr=optimizer_config.learning_rate,
-    #         betas=(optimizer_config.beta1, optimizer_config.beta2),
-    #         weight_decay=optimizer_config.weight_decay,
-    #         eps=optimizer_config.epsilon,
-    #     )
-    # else:
-    #     raise ValueError(f"Optimizer {optimizer_type} not supported")
+    # no decay on bias and layernorm and embedding
+    no_decay = ["bias", "layer_norm.weight", "mlm_ln.weight", "embeddings.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if
+                       p.requires_grad and not any(nd in n for nd in no_decay)],
+            "weight_decay": optimizer_config.weight_decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if
+                       p.requires_grad and any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
 
-    # # Create mask scheduler
-    # if config.get("mask_schedule", None) is not None:
-    #     schedule = config.mask_schedule.schedule
-    #     args = config.mask_schedule.get("params", {})
-    #     mask_schedule = get_mask_chedule(schedule, **args)
-    # else:
-    #     mask_schedule = get_mask_chedule(config.training.get("mask_schedule", "cosine"))
+    optimizer_type = config.optimizer.name
+    if optimizer_type == "adamw":
+        optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=optimizer_config.learning_rate,
+            betas=(optimizer_config.beta1, optimizer_config.beta2),
+            weight_decay=optimizer_config.weight_decay,
+            eps=optimizer_config.epsilon,
+        )
+    else:
+        raise ValueError(f"Optimizer {optimizer_type} not supported")
 
-    # lr_scheduler = get_scheduler(
-    #     config.lr_scheduler.scheduler,
-    #     optimizer=optimizer,
-    #     num_training_steps=config.training.max_train_steps,
-    #     num_warmup_steps=config.lr_scheduler.params.warmup_steps,
-    # )
+    # Create mask scheduler
+    if config.get("mask_schedule", None) is not None:
+        schedule = config.mask_schedule.schedule
+        args = config.mask_schedule.get("params", {})
+        mask_schedule = get_mask_chedule(schedule, **args)
+    else:
+        mask_schedule = get_mask_chedule(config.training.get("mask_schedule", "cosine"))
+
+    lr_scheduler = get_scheduler(
+        config.lr_scheduler.scheduler,
+        optimizer=optimizer,
+        num_training_steps=config.training.max_train_steps,
+        num_warmup_steps=config.lr_scheduler.params.warmup_steps,
+    )
 
     ##################################
     #         DATALOADER             #
@@ -261,6 +269,7 @@ def main():
     total_batch_size_t2i = (
             config.training.batch_size_t2i * accelerator.num_processes * config.training.gradient_accumulation_steps
     )
+    total_batch_size_ti2ss_without_accum = config.training.batch_size_ti2ss * accelerator.num_processes
     total_batch_size_ti2ss = (
         config.training.batch_size_ti2ss * accelerator.num_processes * config.training.gradient_accumulation_steps
     )
@@ -418,12 +427,20 @@ def main():
 
     # Data for ti2ss
     if config.dataset.ti2ss_type == "tuning":
-        train_dataloader_ti2ss = get_ti2ss_data_loader(
+        dataset = CustomADE20KDataset(
+            data_root=config.dataset.params.train_ti2ss_shards_path_or_url,
             batch_size=config.training.batch_size_ti2ss,
             num_workers=dataset_config.num_workers,
             world_size=accelerator.num_processes,
             local_rank=accelerator.process_index,
+            num_train_examples=config.experiment.max_fine_tune_examples_ti2ss,
+            global_batch_size=total_batch_size_ti2ss_without_accum,
+            resolution=512
         )
+        train_dataloader_ti2ss = dataset.train_dataloader
+        num_update_steps_per_epoch = math.ceil(
+            train_dataloader_ti2ss.num_batches / config.training.gradient_accumulation_steps)
+        num_train_epochs = math.ceil(config.training.max_train_steps / num_update_steps_per_epoch)     
 
 
     # Combine these dataloaders into a single iterable model
@@ -610,9 +627,16 @@ def main():
             input_ids = torch.cat((input_ids, input_ids_mmu.to(input_ids.device)), dim=0)
             labels = torch.cat((labels, labels_mmu.to(input_ids.device)), dim=0)
 
+            # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
+            # Build formatted sequences for caption+image to sem seg map
+            # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
+            
+
             if global_step == 0 and epoch == 0:
                 logger.info("Input ids: {}".format(input_ids))
                 logger.info("Labels: {}".format(labels))
+
+
 
             with accelerator.accumulate(model):
                 logits, loss_t2i, loss_lm, loss_mmu = model(

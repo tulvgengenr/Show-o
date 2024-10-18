@@ -1,13 +1,14 @@
 wandb:
   entity: null
   resume: auto
-  run_id: eoc0zan9
+  run_id: 1hu4xdo7
 experiment:
   project: tuning
   name: show-o-tuning-stage2
   output_dir: show-o-tuning-stage2
   max_train_examples_t2i: 20000000
   max_train_examples_mmu: 40000000
+  max_fine_tune_examples_ti2ss: 200000
   save_every: 10000
   eval_every: 2500
   generate_every: 1000
@@ -29,6 +30,8 @@ model:
     codebook_size: 8192
     num_vq_tokens: 256
     num_new_special_tokens: 10
+  blip2:
+    pretrained_model_path: Salesforce/blip2-flan-t5-xl
   gradient_checkpointing: true
 dataset:
   gen_type: t2i

@@ -21,6 +21,7 @@ import math
 import os
 import random
 import re
+import torch
 from functools import partial
 from typing import List, Optional, Union
 
@@ -40,6 +41,11 @@ from webdataset.tariterators import (
     url_opener,
     valid_sample,
 )
+from mmseg.datasets import ADE20KDataset
+from mmengine.registry import init_default_scope
+from mmseg.structures import SegDataSample
+init_default_scope('mmseg')
+from torch.utils.data.distributed import DistributedSampler
 
 person_token = ["a person", "someone", "somebody"]
 
@@ -337,6 +343,109 @@ class Text2ImageDataset:
     @property
     def train_dataloader(self):
         return self._train_dataloader
+    
+
+def collate_fn(
+    instances,
+):  
+    batch = dict()
+    if 'inputs' in instances[0]:
+        images = [instance['inputs'] for instance in instances]
+        images = [instance['image'] for instance in instances]
+    if all(x is not None and x.shape == images[0].shape for x in images):
+        batch['images'] = torch.stack(images)
+    else:
+        batch['images'] = images
+
+    if 'data_samples' in instances[0]:
+        data_samples_list:list[SegDataSample] = [instance['data_samples'] for instance in instances]
+        seg_maps = [data_sample.gt_sem_seg.data for data_sample in data_samples_list]
+    if all(x is not None and x.shape == seg_maps[0].shape for x in seg_maps):
+        batch['seg_maps'] = torch.stack(seg_maps)
+    else:
+        batch['seg_maps'] = seg_maps
+
+    return batch
+    
+class CustomADE20KDataset:
+    def __init__(
+        self, 
+        data_root, 
+        batch_size, 
+        num_workers, 
+        world_size, 
+        local_rank, 
+        num_train_examples: int,
+        global_batch_size: int,
+        resolution=512
+    ):
+        # Data arguments
+        img_norm_cfg = dict(
+            mean=[123.675, 116.28, 103.53], std=[58.395, 57.12, 57.375], to_rgb=True
+        )
+        crop_size = (resolution, resolution)
+
+        ratio_range = (0.5, 2.0)
+        ratio = random.uniform(ratio_range[0], ratio_range[1])
+        if ratio < 1:
+            scale_factor = (ratio, 1)
+        else:
+            scale_factor = (1, 1 / ratio)
+
+        train_pipeline = [
+            dict(type='LoadImageFromFile'),
+            dict(type='LoadAnnotations'),
+            dict(type='Resize', 
+                 scale=(2048, 512), 
+                 scale_factor=scale_factor,
+                 keep_ratio=False,
+            ),
+            dict(type='RandomCrop', crop_size=crop_size, cat_max_ratio=0.75),
+            dict(type='RandomFlip', prob=0.5),
+            dict(type='PhotoMetricDistortion'),
+            dict(type='Normalize', **img_norm_cfg),
+            dict(type='Pad', size=crop_size, pad_val=dict(img=0, seg=255)),
+            dict(type='PackSegInputs')
+        ]
+
+        # Dataset init
+        self._train_dataset = ADE20KDataset(
+            data_root=data_root,
+            data_prefix=dict(img_path='images/training', seg_map_path='annotations/training'),
+            img_suffix='.jpg',
+            seg_map_suffix='.png',
+            reduce_zero_label=True,
+            pipeline=train_pipeline,
+        )
+
+        # Dataloader init
+        datasampler = DistributedSampler(self._train_dataset, num_replicas=world_size, rank=local_rank)
+        self._train_dataloader = torch.utils.data.DataLoader(
+            self._train_dataset,
+            batch_size=batch_size,
+            num_workers=num_workers,
+            pin_memory=True,
+            collate_fn=collate_fn,
+            sampler=datasampler,
+        )
+
+        # For resume
+        num_batches = math.ceil(num_train_examples / global_batch_size)
+        num_worker_batches = math.ceil(num_train_examples / (global_batch_size * num_workers))  # per dataloader worker
+        num_batches = num_worker_batches * num_workers
+        num_samples = num_batches * global_batch_size
+
+        self._train_dataloader.num_batches = num_batches
+        self._train_dataloader.num_samples = num_samples
+
+    @property
+    def train_dataset(self):
+        return self._train_dataset
+
+    @property
+    def train_dataloader(self):
+        return self._train_dataloader
+
 
 if __name__ == '__main__':
     pass
