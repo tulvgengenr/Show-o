@@ -32,7 +32,7 @@ import torch
 from torch.optim import AdamW
 from lightning.pytorch.utilities import CombinedLoader
 
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoProcessor, Blip2ForConditionalGeneration
 from accelerate import Accelerator
 from accelerate.logging import get_logger
 from accelerate.utils import DistributedType, set_seed
@@ -189,7 +189,6 @@ def main():
     vq_model.eval()
     vq_model.requires_grad_(False)
 
-
     # Initialize Show-o model
     if config.model.showo.load_from_showo:
         model = Showo.from_pretrained(config.model.showo.pretrained_model_path).to(accelerator.device)
@@ -204,6 +203,15 @@ def main():
     else:
         model = Showo(**config.model.showo).to(accelerator.device)
     mask_id = model.mask_token_id
+
+    # BLIP2 for ti2ss
+    if hasattr(model, 'module'):
+        blip2_dtype = model.module.showo.model.embed_tokens.weight.dtype
+    else:
+        blip2_dtype = model.showo.model.embed_tokens.weight.dtype
+
+    blip2_processor = AutoProcessor.from_pretrained(config.model.blip2.pretrained_model_path)
+    blip2_model = Blip2ForConditionalGeneration.from_pretrained(config.model.blip2.pretrained_model_path, torch_dtype=blip2_dtype).to(accelerator.device)
 
     ##################################
     #   Optimizer and LR scheduler   #
@@ -623,7 +631,7 @@ def main():
             # Build formatted sequences for caption+image to sem seg map
             # *-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*-------*
             
-        
+
             if global_step == 0 and epoch == 0:
                 logger.info("Input ids: {}".format(input_ids))
                 logger.info("Labels: {}".format(labels))
