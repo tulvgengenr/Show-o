@@ -65,7 +65,7 @@ Below is an overview of **Show-o**. The input data, regardless of its modalities
 - [X] Support image generation in a resolution of 512x512.
 - [ ] Scale up the model size (based on LLaMA3) and increase the number of training data.
 
-## Hugging Face models
+## Hugging Face models and annotations
 
 The Show-o checkpoints can be found on [Hugging Face](https://huggingface.co/showlab):
 * [showlab/show-o-512x512](https://huggingface.co/showlab/show-o-512x512)
@@ -74,6 +74,7 @@ The Show-o checkpoints can be found on [Hugging Face](https://huggingface.co/sho
 * [showlab/show-o](https://huggingface.co/showlab/show-o)
 * [showlab/show-o-w-clip-vit](https://huggingface.co/showlab/show-o-w-clip-vit)
 * [showlab/magvitv2](https://huggingface.co/showlab/magvitv2)
+* [Journeydb-Annotation](https://huggingface.co/datasets/Sierkinhane/JourneyDB-Annotations )
 
 ## Getting Started
 First, set up the environment:
@@ -161,6 +162,12 @@ Stage 2 - Pre-training on Image-Text dataset. The default dataloader is based on
 accelerate launch --config_file path/to/your/accelerate_config --main_process_port=8888 training/train.py config=configs/showo_pretraining_stage2.yaml
 ```
 Stage 3 - Pre-training on High-quality Image-Text dataset. Change the data path in `configs/showo_pretraining_stage3.yaml`
+
+Copy the pre-trained weights to the `output_dir` (specified in the config)
+```
+├── show-o-training-stage3/ 
+|   └── checkpoint-0
+```
 ```
 accelerate launch --config_file path/to/your/accelerate_config --main_process_port=8888 training/train.py config=configs/showo_pretraining_stage3.yaml
 ```
